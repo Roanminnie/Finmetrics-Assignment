@@ -1,0 +1,119 @@
+---
+title: "README"
+author: "Roan Minnie"
+date: "29 August 2018"
+output: html_document
+---
+#Setup
+Install necessary packages
+```{r}
+if (!require("rmsfuns")) devtools::install_github("Nicktz/rmsfuns")
+if (!require("devtools")) install.packages("devtools")
+library(rmsfuns)
+library(tidyverse)
+load_pkg("tidyverse")
+load_pkg("ggplot2")
+
+```
+
+Create the necessary folders
+```{r}
+#Practical.loc.root <- file.path("C:/Users/Roan Minnie/Documents/Masters semester2/Financial econometrics/Assignments/Index_Return_Comparison")
+Practical.loc.root <- file.path(getwd())
+Practical.loc.subdirs <- c("data", "code", "bin")
+PracLoc <- build_path(glue::glue("{Practical.loc.root}/{Practical.loc.subdirs}"))
+```
+
+Download the data and store it in the data folder
+```{r}
+library(rmsfuns)
+load_pkg("readr")
+data <- read_rds("data/Fin_Data_SA_US_NKY.rds")
+```
+Clean data by removing observations with missing market cap
+```{r}
+Tidydata <- data %>% 
+  mutate(Year_Month = format(date, "%Y%B")) %>% 
+  group_by(Year_Month, Market.Cap) %>% 
+  mutate(N_Obs = n(), N_NA = sum(is.na(Market.Cap)) ) %>%
+  filter( N_Obs != N_NA) %>% ungroup() %>% 
+  select(date, Ticker,TRI, Short.Name, Market.Cap, BICS_LEVEL_1_SECTOR_NAME, Universe, Year_Month)
+```
+
+#Calculate the cap-weighted index return for every sector for each country
+
+```{r}
+monthly_returns <- Tidydata %>% 
+  arrange(date) %>% 
+  group_by(BICS_LEVEL_1_SECTOR_NAME, Universe, date) %>% 
+  #calculate market cap shares per sector 
+  mutate(Tot_MC = sum(Market.Cap)) %>% 
+  mutate(MC_weight = Market.Cap/Tot_MC) %>% 
+  ungroup() %>% 
+  #calculate monthly returns per ticker
+  group_by(Year_Month, Ticker) %>% 
+  filter(date == last(date)) %>% 
+  ungroup() %>% 
+  group_by(Ticker) %>% 
+  mutate(Monthly_return = TRI/lag(TRI) - 1) %>%  ungroup() %>% 
+  #now calculate cap weighted return for every sector and universe
+  group_by(Year_Month, Ticker) %>% 
+  mutate(Weighted_Monthly_Ret = Monthly_return*MC_weight) %>% ungroup() %>% 
+  group_by(Year_Month, BICS_LEVEL_1_SECTOR_NAME, Universe) %>% 
+  mutate(Index_monthly_return = sum(Weighted_Monthly_Ret)) %>% 
+  mutate(N_Obs = n(), N_NA = sum(is.na(Index_monthly_return)) ) %>%
+  filter( N_Obs != N_NA) %>% ungroup() %>% 
+  select(Year_Month,BICS_LEVEL_1_SECTOR_NAME,Universe,Index_monthly_return) %>% 
+  arrange(BICS_LEVEL_1_SECTOR_NAME) %>% 
+  unique.data.frame()
+```
+#Calculate the Sharpe ratio
+```{r}
+Sharpe <- Tidydata %>% 
+  arrange(date) %>% 
+  group_by(BICS_LEVEL_1_SECTOR_NAME, Universe, date) %>% 
+  #calculate market cap shares per sector 
+  mutate(Tot_MC = sum(Market.Cap)) %>% 
+  mutate(MC_weight = Market.Cap/Tot_MC) %>% 
+  ungroup() %>% 
+  #calculate market cap weighted daily returns
+  group_by(Ticker) %>% 
+  mutate(Daily_ret =  TRI/lag(TRI) - 1) %>% 
+  mutate(Weighted_Daily_ret = Daily_ret*MC_weight) %>% 
+  ungroup() %>% 
+  group_by(Year_Month, BICS_LEVEL_1_SECTOR_NAME) %>% 
+  summarise(Sharpe = mean(Weighted_Daily_ret, na.rm =TRUE)/ sd(Weighted_Daily_ret, na.rm = TRUE)) %>% 
+  ungroup()
+  print(Sharpe)
+```
+#Cumulative returns - Financial indexes
+Plot the cumulative returns for the financial indexes of the three countries. 
+```{r}
+#Start by caculating the financial returns per country
+Financial <- Tidydata %>%
+  filter(BICS_LEVEL_1_SECTOR_NAME %in% "Financials") %>% 
+  group_by(Ticker) %>% 
+  mutate(Returns = TRI/lag(TRI) - 1) %>% ungroup() %>% 
+  mutate(Returns = coalesce(Returns, 0)) %>% 
+  group_by(Universe) %>% 
+  mutate(Cum_Return = cumprod(1 + Returns)) %>%  ungroup()
+#plot the returns
+Cumreturns <- Financial %>% gather(key = Universe, value = Cum_Return, -date)
+ggplot(data = Cumreturns) + geom_line(aes(x = date, y = Cum_Return, colour = Universe))
+  
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
